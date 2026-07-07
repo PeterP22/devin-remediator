@@ -13,7 +13,7 @@ services:
     environment:
       DB_PATH: /data/remediator.db
     volumes:
-      - remediator-data:/data
+      - ./data:/data
     ports:
       - "8000:8000"
 
@@ -32,5 +32,3 @@ services:
     depends_on:
       - orchestrator
 
-volumes:
-  remediator-data:

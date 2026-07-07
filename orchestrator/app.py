@@ -1,15 +1,19 @@
 """FastAPI wiring: webhook endpoint + background poll loop + status endpoints."""
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse
 
+from . import dashboard
 from .config import settings
 from .db import Store
 from .devin_client import DevinClient
 from .github_client import GitHubClient
 from .poller import poll_once
+from .simulate_stubs import SimDevinClient, SimGitHubClient
 from .webhook import WebhookHandler, verify_signature
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -21,10 +25,13 @@ def build_app(store: Store | None = None,
               github: GitHubClient | None = None,
               start_poller: bool = True) -> FastAPI:
     s = settings()
+    simulate = os.environ.get("SIMULATE") == "1"
     store = store or Store(s.db_path)
-    devin = devin or DevinClient()
-    github = github or GitHubClient()
+    devin = devin or (SimDevinClient() if simulate else DevinClient())
+    github = github or (SimGitHubClient() if simulate else GitHubClient())
     handler = WebhookHandler(store, devin, github)
+    if simulate:
+        log.warning("SIMULATE=1 — Devin/GitHub calls are logged, not made")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -76,6 +83,14 @@ def build_app(store: Store | None = None,
     @app.get("/healthz")
     def healthz():
         return {"ok": True}
+
+    @app.get("/", response_class=HTMLResponse)
+    def index():
+        return dashboard.PAGE
+
+    @app.get("/dashboard/fragment", response_class=HTMLResponse)
+    def dashboard_fragment():
+        return dashboard.render_fragment(store, github)
 
     @app.get("/remediations")
     def remediations():
