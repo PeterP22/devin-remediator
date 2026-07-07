@@ -39,11 +39,18 @@ def poll_once(store: Store, devin: DevinClient, github: GitHubClient) -> int:
         elif detail in ("blocked", "waiting_for_user") and not prs and rem["state"] == "SESSION_CREATED":
             store.set_state(issue_number, "NEEDS_ATTENTION")
             store.log(issue_number, "needs_attention", f"status_detail={detail}")
+            explanation = ""
+            try:
+                msgs = [m for m in devin.get_messages(rem["session_id"]) if m.get("source") == "devin"]
+                if msgs:
+                    explanation = f"\n\nDevin's last report:\n> " + msgs[-1]["message"][:900].replace("\n", "\n> ")
+            except Exception:  # noqa: BLE001 — the comment is still useful without it
+                pass
             github.comment(
                 issue_number,
                 f"🖐️ The session needs human attention (`{detail}`, no PR yet): "
                 f"{rem['session_url']}\n\nPer policy this pipeline never auto-answers "
-                f"a blocked session — please review it directly.",
+                f"a blocked session — please review it directly.{explanation}",
             )
         elif session.get("status") in ("stopped", "expired", "failed") and not prs and rem["state"] != "FAILED":
             store.set_state(issue_number, "FAILED")

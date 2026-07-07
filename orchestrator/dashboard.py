@@ -1,9 +1,11 @@
-"""REMEDIATION OPS — the command center.
+"""Remediation Ops — the command center.
+
+Two views over the same evidence: Overview (leadership altitude — outcomes,
+trends, cost of delay) and Operations (the board + audit trail).
 
 Detected/session/PR come from our own store; validated/merged/verified are
 enriched LIVE from GitHub (check runs, PR merge state, the scanner's
-verification marker). Nothing on this page is the agent's word for anything:
-every stage is backed by a green check, a merge, or a re-scan.
+verification marker). Nothing here is the agent's word for anything.
 """
 import html
 import re
@@ -24,7 +26,6 @@ def _pr_number(pr_url: str) -> int | None:
 
 
 def enrich(github: GitHubClient, rem: dict) -> dict:
-    """validated / merged / verified for one remediation, from GitHub, cached."""
     key = f"{rem['issue_number']}:{rem.get('pr_url')}"
     now = time.time()
     if key in _CACHE and now - _CACHE[key][0] < _TTL:
@@ -54,20 +55,19 @@ def enrich(github: GitHubClient, rem: dict) -> dict:
 
 
 def stage_of(rem: dict, e: dict) -> tuple[str, str]:
-    """(label, css-class) for the furthest evidenced stage."""
     if e["verified"]:
-        return "VERIFIED", "verified"
+        return "Verified", "verified"
     if e["merged"]:
-        return "MERGED", "merged"
+        return "Merged", "merged"
     if e["validated"]:
-        return "VALIDATED", "validated"
+        return "Validated", "validated"
     if rem.get("pr_url"):
-        return "PR OPEN", "propen"
+        return "PR open", "propen"
     if rem["state"] == "NEEDS_ATTENTION":
-        return "NEEDS ATTENTION", "attention"
+        return "Needs attention", "attention"
     if rem["state"] == "FAILED":
-        return "FAILED", "failed"
-    return "WORKING", "working"
+        return "Failed", "failed"
+    return "In progress", "working"
 
 
 def _fmt_duration(rem: dict) -> str:
@@ -87,89 +87,159 @@ def _median_minutes(rems: list[dict]) -> str:
 
 PAGE = """<!doctype html><html><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>REMEDIATION OPS</title>
+<title>Remediation Ops</title>
 <script src="https://unpkg.com/htmx.org@2.0.3"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Michroma&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#070b09; --panel:#0c120e; --panel2:#101712; --line:#1d2a21;
-  --ink:#d6e8dc; --dim:#5d7566; --phos:#41e07f; --phos-dim:#1f6b41;
-  --amber:#f5b942; --red:#ff5d5d; --teal:#3fd0c9; --blue:#5aa9ff;
+  --bg:#F1EFE2; --panel:#FBFAF3; --panel2:#F5F3E6; --line:#E3E0CC;
+  --ink:#20241C; --dim:#8C8A75;
+  --mint:#2FBF71; --mint-soft:#DDF5E8; --mint-deep:#177A4C;
+  --amber:#C98A06; --amber-soft:#F7EBCB; --red:#C94F4F; --red-soft:#F6DFDF;
+  --blue:#3B7DD8; --blue-soft:#E1EAF8;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{
-  background:var(--bg); color:var(--ink);
-  font-family:"IBM Plex Mono",monospace; font-size:14px;
-  min-height:100vh; padding:28px 34px 60px;
-  background-image:
-    radial-gradient(1100px 500px at 75% -10%, rgba(65,224,127,.05), transparent 60%),
-    repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0 1px, transparent 1px 3px);
-}
-a{color:var(--phos);text-decoration:none}
+body{background:var(--bg);color:var(--ink);font-family:"Sora",sans-serif;font-size:14px;min-height:100vh;padding:30px 38px 60px}
+a{color:var(--mint-deep);text-decoration:none}
 a:hover{text-decoration:underline}
-header{display:flex;align-items:baseline;gap:20px;border-bottom:1px solid var(--line);padding-bottom:16px;margin-bottom:22px;flex-wrap:wrap}
-h1{font-family:"Michroma",monospace;font-size:19px;letter-spacing:.28em;color:#fff;font-weight:400}
-h1 .accent{color:var(--phos)}
-.sub{color:var(--dim);font-size:12px;letter-spacing:.06em}
-.live{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--phos);font-size:12px;letter-spacing:.2em}
-.led{width:9px;height:9px;border-radius:50%;background:var(--phos);box-shadow:0 0 10px var(--phos);animation:pulse 2.2s infinite}
+.mono{font-family:"IBM Plex Mono",monospace}
+header{display:flex;align-items:center;gap:18px;margin-bottom:8px;flex-wrap:wrap}
+.mark{width:34px;height:34px;border-radius:9px;background:var(--ink);color:var(--mint);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px}
+h1{font-size:21px;font-weight:700;letter-spacing:-.01em}
+.sub{color:var(--dim);font-size:12.5px;width:100%;margin:2px 0 0 52px}
+.live{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--mint-deep);font-size:12px;font-weight:600}
+.led{width:9px;height:9px;border-radius:50%;background:var(--mint);animation:pulse 2.2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
-.statgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:26px}
-.stat{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px;position:relative;overflow:hidden}
-.stat::after{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:linear-gradient(90deg,var(--phos),transparent 70%);opacity:.5}
-.stat .v{font-family:"Michroma",monospace;font-size:26px;color:#fff;margin-bottom:4px}
-.stat .k{color:var(--dim);font-size:11px;letter-spacing:.16em;text-transform:uppercase}
-.railwrap{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:26px 30px 22px;margin-bottom:26px}
-.railtitle{color:var(--dim);font-size:11px;letter-spacing:.22em;margin-bottom:22px;text-transform:uppercase}
-.rail{display:flex;align-items:flex-start}
-.node{flex:0 0 auto;text-align:center;width:96px}
-.node .num{font-family:"Michroma",monospace;font-size:24px;color:var(--phos);text-shadow:0 0 14px rgba(65,224,127,.45)}
-.node.zero .num{color:var(--dim);text-shadow:none}
-.node .lbl{color:var(--dim);font-size:10px;letter-spacing:.14em;text-transform:uppercase;margin-top:6px}
-.node .dot{width:11px;height:11px;border-radius:50%;background:var(--phos);box-shadow:0 0 12px rgba(65,224,127,.6);margin:12px auto 0}
-.node.zero .dot{background:var(--panel2);border:1px solid var(--line);box-shadow:none}
-.link{flex:1 1 0;height:1px;background:linear-gradient(90deg,var(--phos-dim),var(--phos-dim));margin-top:64px;min-width:18px;position:relative}
-.link::after{content:"";position:absolute;top:-2px;left:0;width:40%;height:5px;filter:blur(4px);background:var(--phos);opacity:.25;animation:flow 3s linear infinite}
-@keyframes flow{from{left:0}to{left:60%}}
-.cols{display:grid;grid-template-columns:minmax(0,2.1fr) minmax(280px,1fr);gap:14px;align-items:start}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}
-.panel h2{font-size:11px;color:var(--dim);letter-spacing:.22em;text-transform:uppercase;padding:13px 16px;border-bottom:1px solid var(--line);background:var(--panel2)}
+nav{display:flex;gap:8px;margin:22px 0 18px}
+nav button{font-family:"Sora",sans-serif;font-size:13px;font-weight:600;padding:8px 18px;border-radius:99px;border:1px solid var(--line);background:var(--panel);color:var(--dim);cursor:pointer;transition:all .15s}
+nav button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:18px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+.kpi .v{font-family:"IBM Plex Mono",monospace;font-size:30px;font-weight:600;letter-spacing:-.02em}
+.kpi .v small{font-size:15px;color:var(--dim)}
+.kpi .k{color:var(--dim);font-size:12px;margin-top:4px}
+.kpi.good .v{color:var(--mint-deep)}
+.kpi.warn .v{color:var(--red)}
+.grid2{display:grid;grid-template-columns:minmax(300px,1fr) minmax(0,1.6fr);gap:14px;margin-bottom:14px;align-items:stretch}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px}
+.card h3{font-size:13px;font-weight:600;margin-bottom:16px;color:var(--ink)}
+.card h3 span{color:var(--dim);font-weight:400}
+.donutwrap{display:flex;align-items:center;gap:26px;flex-wrap:wrap}
+.legend{font-size:12.5px;display:flex;flex-direction:column;gap:9px}
+.legend .li{display:flex;align-items:center;gap:9px}
+.legend .sw{width:11px;height:11px;border-radius:3px}
+.bars .brow{display:grid;grid-template-columns:150px 1fr 74px;align-items:center;gap:12px;margin-bottom:11px;font-size:12.5px}
+.bars .track{background:var(--panel2);border-radius:99px;height:14px;overflow:hidden}
+.bars .fill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--mint),#6fdCA8)}
+.bars .fill.pending{background:repeating-linear-gradient(45deg,var(--amber-soft),var(--amber-soft) 6px,#eeddb2 6px 12px)}
+.bars .dur{font-family:"IBM Plex Mono",monospace;color:var(--dim);text-align:right}
+.funnel{display:flex;align-items:center;gap:0;margin-top:4px;flex-wrap:wrap}
+.fstage{text-align:center;flex:1;min-width:56px}
+.fstage .n{font-family:"IBM Plex Mono",monospace;font-size:24px;font-weight:600;color:var(--mint-deep)}
+.fstage.zero .n{color:var(--dim)}
+.fstage .l{font-size:11px;color:var(--dim);margin-top:2px}
+.farrow{color:var(--line);font-size:18px;flex:0}
 table{border-collapse:collapse;width:100%}
-th{color:var(--dim);font-size:10px;letter-spacing:.14em;text-transform:uppercase;text-align:left;padding:10px 14px;border-bottom:1px solid var(--line)}
-td{padding:11px 14px;border-bottom:1px solid rgba(29,42,33,.55);font-size:13px}
-tr:hover td{background:rgba(65,224,127,.04)}
-.pkg{color:#fff;font-weight:600}
-.badge{display:inline-block;font-size:10px;letter-spacing:.12em;padding:3px 9px;border-radius:3px;border:1px solid}
-.badge.verified{color:var(--phos);border-color:var(--phos-dim);background:rgba(65,224,127,.08);box-shadow:0 0 8px rgba(65,224,127,.15)}
-.badge.merged{color:var(--teal);border-color:rgba(63,208,201,.35);background:rgba(63,208,201,.07)}
-.badge.validated{color:#b8e05a;border-color:rgba(184,224,90,.35);background:rgba(184,224,90,.07)}
-.badge.propen{color:var(--blue);border-color:rgba(90,169,255,.35);background:rgba(90,169,255,.07)}
-.badge.working{color:var(--amber);border-color:rgba(245,185,66,.4);background:rgba(245,185,66,.07);animation:pulse 1.6s infinite}
-.badge.attention,.badge.failed{color:var(--red);border-color:rgba(255,93,93,.4);background:rgba(255,93,93,.08)}
-.checks span{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;background:var(--panel2);border:1px solid var(--line)}
-.checks span.on{background:var(--phos);border-color:var(--phos);box-shadow:0 0 6px rgba(65,224,127,.5)}
-.log{list-style:none;max-height:430px;overflow-y:auto}
-.log li{padding:9px 16px;border-bottom:1px solid rgba(29,42,33,.5);font-size:12px;display:flex;gap:10px}
-.log .ts{color:var(--dim);flex:0 0 auto}
-.log .kind{color:var(--phos);flex:0 0 auto;letter-spacing:.06em}
+th{color:var(--dim);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;text-align:left;padding:10px 14px;border-bottom:1px solid var(--line)}
+td{padding:12px 14px;border-bottom:1px solid var(--panel2);font-size:13px}
+tr:hover td{background:var(--panel2)}
+.pkg{font-weight:600}
+.badge{display:inline-block;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:99px}
+.badge.verified{background:var(--mint-soft);color:var(--mint-deep)}
+.badge.merged{background:var(--blue-soft);color:var(--blue)}
+.badge.validated{background:#EAF3D9;color:#5C7A1E}
+.badge.propen{background:var(--blue-soft);color:var(--blue)}
+.badge.working{background:var(--amber-soft);color:var(--amber);animation:pulse 1.8s infinite}
+.badge.attention,.badge.failed{background:var(--red-soft);color:var(--red)}
+.checks span{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;background:var(--panel2);border:1px solid var(--line)}
+.checks span.on{background:var(--mint);border-color:var(--mint)}
+.log{list-style:none;max-height:420px;overflow-y:auto}
+.log li{padding:9px 4px;border-bottom:1px solid var(--panel2);font-size:12.5px;display:flex;gap:10px}
+.log .ts{color:var(--dim);flex:0 0 auto;font-family:"IBM Plex Mono",monospace}
+.log .kind{color:var(--mint-deep);font-weight:600;flex:0 0 auto}
 .log .kind.attention{color:var(--red)}
-.log .detail{color:var(--ink);opacity:.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.log .detail{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dim{color:var(--dim)}
-footer{margin-top:26px;color:var(--dim);font-size:11px;letter-spacing:.08em}
-@media (max-width:900px){.cols{grid-template-columns:1fr}}
+footer{margin-top:24px;color:var(--dim);font-size:12px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
 </style></head><body>
 <header>
-  <h1>REMEDIATION<span class="accent">/OPS</span></h1>
-  <span class="sub">autonomous CVE remediation · every number backed by a green check, a merge, or a re-scan — never the agent's self-report</span>
+  <div class="mark">◍</div><h1>Remediation Ops</h1>
   <span class="live"><span class="led"></span>LIVE</span>
+  <p class="sub">autonomous CVE remediation on the Devin API · every number is backed by a green check, a merged PR, or a re-scan — never the agent's self-report</p>
 </header>
-<div hx-get="/dashboard/fragment" hx-trigger="load, every 15s" hx-swap="innerHTML"><p class="dim">acquiring signal…</p></div>
-<footer>devin-remediator · orchestrator + scanner + validation gate · humans review code, they no longer produce the fix</footer>
+<nav>
+  <button id="tab-overview" class="on" onclick="setTab('overview')">Overview</button>
+  <button id="tab-ops" onclick="setTab('ops')">Operations</button>
+</nav>
+<div id="body" hx-get="/dashboard/fragment" hx-trigger="load, every 15s" hx-swap="innerHTML"><p class="dim">loading…</p></div>
+<footer>devin-remediator · scanner → orchestrator → Devin session → validation gate → human merge → re-scan · humans review code, they no longer produce the fix</footer>
+<script>
+let tab = 'overview';
+function applyTab(){
+  document.querySelectorAll('[data-view]').forEach(el => el.style.display = (el.dataset.view === tab ? '' : 'none'));
+  document.getElementById('tab-overview').classList.toggle('on', tab === 'overview');
+  document.getElementById('tab-ops').classList.toggle('on', tab === 'ops');
+}
+function setTab(t){ tab = t; applyTab(); }
+document.getElementById('body').addEventListener('htmx:afterSwap', applyTab);
+</script>
 </body></html>"""
 
 
 FUNNEL_STAGES = ("detected", "session", "pr", "validated", "merged", "verified")
+
+
+def _donut(verified: int, working: int, attention: int) -> str:
+    total = max(verified + working + attention, 1)
+    r, cx, cy, w = 62, 80, 80, 20
+    circ = 2 * 3.14159 * r
+    segs, offset = [], 0.0
+    for count, color in ((verified, "#2FBF71"), (working, "#C98A06"), (attention, "#C94F4F")):
+        if count:
+            frac = count / total
+            segs.append(
+                f'<circle r="{r}" cx="{cx}" cy="{cy}" fill="none" stroke="{color}" stroke-width="{w}" '
+                f'stroke-dasharray="{frac * circ - 3:.1f} {circ:.1f}" stroke-dashoffset="{-offset * circ:.1f}" '
+                f'transform="rotate(-90 {cx} {cy})" stroke-linecap="round"/>'
+            )
+            offset += frac
+    pct = round(100 * verified / total)
+    return (
+        f'<svg width="160" height="160" viewBox="0 0 160 160">'
+        f'<circle r="{r}" cx="{cx}" cy="{cy}" fill="none" stroke="#F5F3E6" stroke-width="{w}"/>'
+        + "".join(segs)
+        + f'<text x="{cx}" y="{cy - 2}" text-anchor="middle" font-family="IBM Plex Mono" font-size="30" font-weight="600" fill="#20241C">{pct}%</text>'
+        + f'<text x="{cx}" y="{cy + 20}" text-anchor="middle" font-family="Sora" font-size="11" fill="#8C8A75">verified</text></svg>'
+    )
+
+
+def _timeline(rems: list[dict]) -> str:
+    """Cumulative verified-remediation step chart (SVG)."""
+    pts = sorted(r["updated_at"] for r in rems if r.get("pr_url"))
+    if len(pts) < 2:
+        return '<p class="dim">timeline appears after two remediations</p>'
+    W, H, pad = 560, 130, 14
+    t0, t1 = pts[0], pts[-1]
+    span = max(t1 - t0, 1)
+    coords = []
+    for i, t in enumerate(pts):
+        x = pad + (t - t0) / span * (W - 2 * pad)
+        y = H - pad - (i + 1) / len(pts) * (H - 2 * pad)
+        if coords:
+            coords.append((x, coords[-1][1]))
+        coords.append((x, y))
+    path = "M" + " L".join(f"{x:.0f},{y:.0f}" for x, y in coords)
+    dots = "".join(
+        f'<circle cx="{x:.0f}" cy="{y:.0f}" r="4" fill="#2FBF71"/>'
+        for x, y in coords[::2]
+    )
+    return (
+        f'<svg width="100%" viewBox="0 0 {W} {H}" preserveAspectRatio="none" style="max-height:{H}px">'
+        f'<path d="{path}" fill="none" stroke="#2FBF71" stroke-width="2.5"/>' + dots + "</svg>"
+        f'<p class="dim" style="font-size:11.5px;margin-top:4px">cumulative PRs delivered over the run — parallel fan-out means wall-clock ≈ slowest fix, not the sum</p>'
+    )
 
 
 def render_fragment(store: Store, github: GitHubClient) -> str:
@@ -184,25 +254,60 @@ def render_fragment(store: Store, github: GitHubClient) -> str:
         "verified": sum(1 for r in rems if en[r["issue_number"]]["verified"]),
     }
     attention = sum(1 for r in rems if r["state"] in ("NEEDS_ATTENTION", "FAILED"))
+    working = sum(1 for r in rems if not r.get("pr_url") and r["state"] == "SESSION_CREATED")
 
-    stats = (
-        f'<div class="statgrid">'
-        f'<div class="stat"><div class="v">{counts["verified"]}<span class="dim" style="font-size:15px">/{counts["detected"]}</span></div><div class="k">verified remediated</div></div>'
-        f'<div class="stat"><div class="v">{counts["validated"] * 4}/{counts["pr"] * 4}</div><div class="k">validation checks green</div></div>'
-        f'<div class="stat"><div class="v">{_median_minutes(rems)}</div><div class="k">median time to PR</div></div>'
-        f'<div class="stat"><div class="v" style="color:{"#ff5d5d" if attention else "#fff"}">{attention}</div><div class="k">need human attention</div></div>'
-        f"</div>"
+    kpis = (
+        '<div class="kpis">'
+        f'<div class="kpi good"><div class="v">{counts["verified"]}<small>/{counts["detected"]}</small></div><div class="k">vulnerabilities verified remediated</div></div>'
+        f'<div class="kpi"><div class="v">{counts["validated"] * 4}<small>/{counts["pr"] * 4}</small></div><div class="k">validation checks green</div></div>'
+        f'<div class="kpi"><div class="v">{_median_minutes(rems)}</div><div class="k">median finding → merge-ready PR</div></div>'
+        f'<div class="kpi {"warn" if attention else ""}"><div class="v">{attention}</div><div class="k">need human attention</div></div>'
+        "</div>"
     )
 
-    nodes = ""
+    donut_card = (
+        '<div class="card"><h3>Outcomes <span>· live</span></h3><div class="donutwrap">'
+        + _donut(counts["verified"], working, attention)
+        + '<div class="legend">'
+        f'<div class="li"><span class="sw" style="background:#2FBF71"></span>verified remediated · {counts["verified"]}</div>'
+        f'<div class="li"><span class="sw" style="background:#C98A06"></span>in progress · {working}</div>'
+        f'<div class="li"><span class="sw" style="background:#C94F4F"></span>needs attention · {attention}</div>'
+        "</div></div></div>"
+    )
+
+    max_secs = max((int(r["updated_at"] - r["created_at"]) for r in rems if r.get("pr_url")), default=1)
+    brows = ""
+    for r in sorted(rems, key=lambda x: x["issue_number"]):
+        if r.get("pr_url"):
+            secs = int(r["updated_at"] - r["created_at"])
+            pct = max(6, round(100 * secs / max_secs))
+            fill = f'<div class="fill" style="width:{pct}%"></div>'
+            dur = _fmt_duration(r)
+        else:
+            fill = '<div class="fill pending" style="width:100%"></div>'
+            dur = "…" if r["state"] == "SESSION_CREATED" else "—"
+        brows += (
+            f'<div class="brow"><span class="pkg">{html.escape(r["package"])}</span>'
+            f'<div class="track">{fill}</div><span class="dur">{dur}</span></div>'
+        )
+    bars_card = f'<div class="card bars"><h3>Time from finding to merge-ready PR</h3>{brows}</div>'
+
+    fun = ""
     for i, s in enumerate(FUNNEL_STAGES):
         z = " zero" if counts[s] == 0 else ""
-        nodes += f'<div class="node{z}"><div class="num">{counts[s]}</div><div class="lbl">{s}</div><div class="dot"></div></div>'
+        fun += f'<div class="fstage{z}"><div class="n">{counts[s]}</div><div class="l">{s}</div></div>'
         if i < len(FUNNEL_STAGES) - 1:
-            nodes += '<div class="link"></div>'
-    rail = (
-        '<div class="railwrap"><div class="railtitle">Evidence funnel — detected → session → PR → validated → merged → rescan-verified</div>'
-        f'<div class="rail">{nodes}</div></div>'
+            fun += '<div class="farrow">›</div>'
+    funnel_card = (
+        '<div class="card"><h3>Evidence funnel <span>· every stage machine-checked</span></h3>'
+        f'<div class="funnel">{fun}</div></div>'
+    )
+    timeline_card = f'<div class="card"><h3>Delivery timeline</h3>{_timeline(rems)}</div>'
+
+    overview = (
+        f'<div data-view="overview">{kpis}'
+        f'<div class="grid2">{donut_card}{bars_card}</div>'
+        f'<div class="grid2">{funnel_card}{timeline_card}</div></div>'
     )
 
     rows = ""
@@ -216,16 +321,16 @@ def render_fragment(store: Store, github: GitHubClient) -> str:
             for v in (bool(r.get("pr_url")), e["validated"], e["merged"], e["verified"])
         )
         rows += (
-            f'<tr><td><a href="https://github.com/{github._repo}/issues/{r["issue_number"]}">#{r["issue_number"]}</a></td>'
+            f'<tr><td class="mono"><a href="https://github.com/{github._repo}/issues/{r["issue_number"]}">#{r["issue_number"]}</a></td>'
             f'<td class="pkg">{html.escape(r["package"])}</td>'
-            f'<td class="dim">{html.escape(r["cve"] or r["vuln_id"])}</td>'
+            f'<td class="mono dim">{html.escape(r["cve"] or r["vuln_id"])}</td>'
             f'<td><span class="badge {cls}">{label}</span></td>'
-            f"<td>{sess}</td><td>{pr_link}</td>"
+            f"<td>{sess}</td><td class='mono'>{pr_link}</td>"
             f'<td class="checks">{dots}</td>'
-            f"<td>{_fmt_duration(r)}</td></tr>"
+            f'<td class="mono">{_fmt_duration(r)}</td></tr>'
         )
     board = (
-        '<div class="panel"><h2>Remediation board</h2><table>'
+        '<div class="card" style="padding:0"><h3 style="padding:18px 22px 0">Remediation board</h3><table>'
         "<tr><th>issue</th><th>package</th><th>cve</th><th>stage</th><th>session</th><th>pr</th>"
         "<th>pr·val·mrg·ver</th><th>time to pr</th></tr>"
         f"{rows}</table></div>"
@@ -233,7 +338,7 @@ def render_fragment(store: Store, github: GitHubClient) -> str:
 
     events = store.events()
     items = ""
-    for ev in list(reversed(events))[:22]:
+    for ev in list(reversed(events))[:24]:
         ts = datetime.fromtimestamp(ev["ts"], tz=timezone.utc).strftime("%H:%M:%S")
         kcls = "attention" if ev["kind"] in ("needs_attention", "failed", "error", "parse_failed") else ""
         detail = html.escape((ev.get("detail") or "")[:80])
@@ -241,6 +346,7 @@ def render_fragment(store: Store, github: GitHubClient) -> str:
             f'<li><span class="ts">{ts}</span><span class="kind {kcls}">#{ev["issue_number"]} {ev["kind"]}</span>'
             f'<span class="detail">{detail}</span></li>'
         )
-    log = f'<div class="panel"><h2>Event log — audit trail</h2><ul class="log">{items or "<li class=dim>no events yet</li>"}</ul></div>'
+    log = f'<div class="card"><h3>Event log <span>· audit trail</span></h3><ul class="log">{items or "<li class=dim>no events yet</li>"}</ul></div>'
+    ops = f'<div data-view="ops" style="display:none"><div class="grid2" style="grid-template-columns:minmax(0,2fr) minmax(280px,1fr)">{board}{log}</div></div>'
 
-    return stats + rail + f'<div class="cols">{board}{log}</div>'
+    return overview + ops

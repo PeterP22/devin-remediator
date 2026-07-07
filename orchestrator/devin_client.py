@@ -41,6 +41,11 @@ class DevinClient:
         r.raise_for_status()
         return r.json()
 
+    def get_messages(self, session_id: str) -> list[dict]:
+        r = self._client.get(f"{self._base}/sessions/{session_id}/messages")
+        r.raise_for_status()
+        return r.json().get("items", [])
+
     def send_message(self, session_id: str, message: str) -> dict:
         r = self._client.post(f"{self._base}/sessions/{session_id}/messages", json={"message": message})
         r.raise_for_status()
