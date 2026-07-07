@@ -1,0 +1,36 @@
+# Full local stack:
+#   orchestrator — FastAPI webhook receiver + session poller (port 8000)
+#   smee         — relays GitHub webhooks to the orchestrator for local dev
+#                  (set SMEE_URL from https://smee.io/new and point the GitHub
+#                  webhook at it; in production you'd expose /webhook/github
+#                  directly and drop this container)
+#   scanner      — scheduled re-scan every 30 min (files new findings, closes
+#                  verified-remediated issues)
+services:
+  orchestrator:
+    build: .
+    env_file: .env
+    environment:
+      DB_PATH: /data/remediator.db
+    volumes:
+      - remediator-data:/data
+    ports:
+      - "8000:8000"
+
+  smee:
+    image: node:22-alpine
+    command: sh -c "npm install -g smee-client && smee --url $${SMEE_URL} --target http://orchestrator:8000/webhook/github"
+    env_file: .env
+    depends_on:
+      - orchestrator
+    restart: unless-stopped
+
+  scanner:
+    build: .
+    env_file: .env
+    command: python scanner/scan.py --loop 1800
+    depends_on:
+      - orchestrator
+
+volumes:
+  remediator-data:
