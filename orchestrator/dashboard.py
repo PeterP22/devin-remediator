@@ -31,9 +31,12 @@ def enrich(github: GitHubClient, rem: dict) -> dict:
     if key in _CACHE and now - _CACHE[key][0] < _TTL:
         return _CACHE[key][1]
 
-    out = {"validated": False, "merged": False, "verified": False}
+    out = {"validated": False, "merged": False, "verified": False, "issue_closed": False}
     pr_n = _pr_number(rem.get("pr_url") or "")
     try:
+        issue = github._client.get(f"/repos/{github._repo}/issues/{rem['issue_number']}")
+        issue.raise_for_status()
+        out["issue_closed"] = issue.json().get("state") == "closed"
         if pr_n:
             pr = github._client.get(f"/repos/{github._repo}/pulls/{pr_n}")
             pr.raise_for_status()
@@ -64,6 +67,8 @@ def stage_of(rem: dict, e: dict) -> tuple[str, str]:
     if rem.get("pr_url"):
         return "PR open", "propen"
     if rem["state"] == "NEEDS_ATTENTION":
+        if e.get("issue_closed"):
+            return "Human resolved", "resolved"
         return "Needs attention", "attention"
     if rem["state"] == "FAILED":
         return "Failed", "failed"
@@ -152,6 +157,7 @@ tr:hover td{background:var(--panel2)}
 .badge.propen{background:var(--blue-soft);color:var(--blue)}
 .badge.working{background:var(--amber-soft);color:var(--amber);animation:pulse 1.8s infinite}
 .badge.attention,.badge.failed{background:var(--red-soft);color:var(--red)}
+.badge.resolved{background:var(--panel2);color:var(--dim)}
 .checks span{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;background:var(--panel2);border:1px solid var(--line)}
 .checks span.on{background:var(--mint);border-color:var(--mint)}
 .log{list-style:none;max-height:420px;overflow-y:auto}
@@ -253,7 +259,10 @@ def render_fragment(store: Store, github: GitHubClient) -> str:
         "merged": sum(1 for r in rems if en[r["issue_number"]]["merged"]),
         "verified": sum(1 for r in rems if en[r["issue_number"]]["verified"]),
     }
-    attention = sum(1 for r in rems if r["state"] in ("NEEDS_ATTENTION", "FAILED"))
+    attention = sum(
+        1 for r in rems
+        if r["state"] in ("NEEDS_ATTENTION", "FAILED") and not en[r["issue_number"]].get("issue_closed")
+    )
     working = sum(1 for r in rems if not r.get("pr_url") and r["state"] == "SESSION_CREATED")
 
     kpis = (
