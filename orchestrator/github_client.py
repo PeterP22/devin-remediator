@@ -32,6 +32,11 @@ class GitHubClient:
         r.raise_for_status()
         return r.json()
 
+    def list_comments(self, issue_number: int) -> list[dict]:
+        r = self._client.get(f"/repos/{self._repo}/issues/{issue_number}/comments", params={"per_page": 100})
+        r.raise_for_status()
+        return r.json()
+
     def list_issues(self, labels: str, state: str = "all") -> list[dict]:
         out: list[dict] = []
         page = 1

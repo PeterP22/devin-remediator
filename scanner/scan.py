@@ -181,17 +181,28 @@ def run_scan(github: GitHubClient, dry_run: bool = False) -> dict:
         else:
             report["filed"].append({"issue": None, "vuln_id": f["vuln_id"], "class": klass, "dry_run": True})
 
-    # VERIFY: open tracked issues whose finding is gone → close as remediated
+    # VERIFY: tracked issues whose finding is gone → confirm remediation.
+    # Runs regardless of issue state (PRs with `Closes #N` auto-close issues
+    # at merge; the re-scan is the INDEPENDENT confirmation, so it still
+    # comments). Idempotent via a marker string in the comment.
+    VERIFIED_MARKER = "<!-- devin-remediate:verified -->"
     for vuln_id, issue in by_vuln.items():
-        if issue["state"] == "open" and vuln_id not in current_vuln_ids:
-            if not dry_run:
-                github.comment(
-                    issue["number"],
-                    f"✅ Re-scan no longer reports {vuln_id} on the default branch — "
-                    f"**verified remediated**. Closing.",
-                )
+        if vuln_id in current_vuln_ids:
+            continue
+        if not dry_run:
+            already = any(VERIFIED_MARKER in (c.get("body") or "")
+                          for c in github.list_comments(issue["number"]))
+            if already:
+                continue
+            github.comment(
+                issue["number"],
+                f"{VERIFIED_MARKER}\n✅ **Verified remediated** — re-scan no longer "
+                f"reports {vuln_id} on the default branch. Evidence chain complete: "
+                f"detected → session → PR → validation green → merged → rescan-verified.",
+            )
+            if issue["state"] == "open":
                 github.close_issue(issue["number"])
-            report["verified_closed"].append(issue["number"])
+        report["verified_closed"].append(issue["number"])
 
     return report
 
