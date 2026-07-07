@@ -109,37 +109,72 @@ def audit(pins_by_file: dict[str, list[tuple[str, str]]]) -> list[dict]:
     return findings
 
 
+def group_by_package(findings: list[dict]) -> list[dict]:
+    """One remediation per package: the bump to the highest fixed version
+    clears every advisory on that package (the unit of work is the bump,
+    not the CVE). Unfixed advisories are kept separate — they can't be
+    remediated by the bump and are reported, not filed."""
+    grouped: dict[str, dict] = {}
+    passthrough = []
+    for f in findings:
+        if not f["fixed"]:
+            passthrough.append(f)
+            continue
+        g = grouped.get(f["package"])
+        if g is None:
+            grouped[f["package"]] = {**f, "also": []}
+            continue
+        # keep the finding with the highest fix version as primary
+        key = lambda v: [int(x) for x in re.findall(r"\d+", v)]  # noqa: E731
+        if key(f["fixed"]) > key(g["fixed"]):
+            g["also"].append(g["vuln_id"])
+            g.update({k: f[k] for k in ("vuln_id", "cve", "fixed", "summary")})
+        else:
+            g["also"].append(f["vuln_id"])
+        g["req_files"] = sorted(set(g["req_files"]) | set(f["req_files"]))
+    return list(grouped.values()) + passthrough
+
+
 def run_scan(github: GitHubClient, dry_run: bool = False) -> dict:
     s = settings()
     pins_by_file = {}
     for path in REQUIREMENTS_FILES:
         pins_by_file[path] = parse_pins(github.get_file_raw(path))
-    findings = audit(pins_by_file)
+    findings = group_by_package(audit(pins_by_file))
 
     existing = github.list_issues(labels=s.remediate_label, state="all")
     by_vuln: dict[str, dict] = {}
+    open_packages: set[str] = set()
     for issue in existing:
-        if MARKER not in (issue.get("body") or ""):
+        body = issue.get("body") or ""
+        if MARKER not in body:
             continue
-        m = re.search(r"^Vuln-Id:\s*(\S+)", issue["body"], re.M)
+        m = re.search(r"^Vuln-Id:\s*(\S+)", body, re.M)
         if m:
             by_vuln[m.group(1)] = issue
+        p = re.search(r"^Package:\s*(\S+)", body, re.M)
+        if p and issue["state"] == "open":
+            open_packages.add(p.group(1).lower())
 
     report = {"findings": len(findings), "filed": [], "unfixable": [], "verified_closed": [], "already_tracked": []}
     current_vuln_ids = set()
 
     for f in findings:
         current_vuln_ids.add(f["vuln_id"])
-        if f["vuln_id"] in by_vuln:
-            report["already_tracked"].append(f["vuln_id"])
-            continue
+        current_vuln_ids.update(f.get("also", []))
         if not f["fixed"]:
             report["unfixable"].append(f"{f['package']}=={f['pinned']} ({f['vuln_id']}) — no fixed release")
             continue
+        # dedupe by vuln id (any state) and by package (open issues) — a
+        # regrouped scan must not file a second issue for the same bump
+        if f["vuln_id"] in by_vuln or f["package"] in open_packages:
+            report["already_tracked"].append(f["vuln_id"])
+            continue
         klass = classify(f["pinned"], f["fixed"])
-        title = f"CVE remediation: {f['package']} {f['pinned']} → {f['fixed']} ({f['cve']})"
+        n_extra = len(f.get("also", []))
+        title = f"CVE remediation: {f['package']} {f['pinned']} → {f['fixed']} ({f['cve']}{f' +{n_extra}' if n_extra else ''})"
         body = render(f["package"], f["pinned"], f["fixed"], f["vuln_id"], f["cve"],
-                      f["req_files"], klass, f["summary"])
+                      f["req_files"], klass, f["summary"], also_fixes=f.get("also"))
         if not dry_run:
             issue = github.create_issue(title, body, labels=[s.remediate_label, f"class:{klass}"])
             report["filed"].append({"issue": issue["number"], "vuln_id": f["vuln_id"], "class": klass})

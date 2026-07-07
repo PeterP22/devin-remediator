@@ -16,12 +16,13 @@ Pinned: {pinned}
 Fixed-Version: {fixed}
 Vuln-Id: {vuln_id}
 CVE: {cve}
+Also-Fixes: {also_fixes}
 Requirements-Files: {req_files}
 Class: {klass}
 
 ### Finding
 
-`{package}=={pinned}` is affected by [{vuln_id}](https://osv.dev/vulnerability/{vuln_id}) ({cve}).
+`{package}=={pinned}` is affected by [{vuln_id}](https://osv.dev/vulnerability/{vuln_id}) ({cve}){also_note}.
 Fixed in `{package}>={fixed}`.
 
 {summary}
@@ -34,11 +35,15 @@ _FIELD = re.compile(r"^([A-Za-z-]+):\s*(.+?)\s*$", re.M)
 
 
 def render(package: str, pinned: str, fixed: str, vuln_id: str, cve: str,
-           req_files: list[str], klass: str, summary: str = "") -> str:
+           req_files: list[str], klass: str, summary: str = "",
+           also_fixes: list[str] | None = None) -> str:
+    also = also_fixes or []
     return TEMPLATE.format(
         marker=MARKER, package=package, pinned=pinned, fixed=fixed,
         vuln_id=vuln_id, cve=cve, req_files=" ".join(req_files),
         klass=klass, summary=summary,
+        also_fixes=" ".join(also) if also else "-",
+        also_note=f" and {len(also)} further advisories ({', '.join(also)})" if also else "",
     )
 
 

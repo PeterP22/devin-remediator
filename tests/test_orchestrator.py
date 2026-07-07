@@ -152,3 +152,29 @@ def test_classify_major_vs_minor():
     assert ("flask", "2.3.3") in pins
     assert ("apache-superset", "1.0") in pins
     assert len(pins) == 2
+
+
+def test_group_by_package_one_issue_per_bump():
+    from scanner.scan import group_by_package
+    mk = lambda vid, fixed, cve="CVE-X": {  # noqa: E731
+        "package": "python-multipart", "pinned": "0.0.29", "vuln_id": vid,
+        "cve": cve, "fixed": fixed, "summary": "s", "req_files": ["requirements/development.txt"],
+    }
+    unfixed = {"package": "paramiko", "pinned": "3.5.1", "vuln_id": "GHSA-P", "cve": "CVE-P",
+               "fixed": None, "summary": "s", "req_files": ["requirements/base.txt"]}
+    out = group_by_package([mk("GHSA-A", "0.0.30"), mk("GHSA-B", "0.0.31"), mk("GHSA-C", "0.0.30"), unfixed])
+    assert len(out) == 2
+    grouped = next(o for o in out if o["package"] == "python-multipart")
+    assert grouped["fixed"] == "0.0.31"          # highest fix wins
+    assert grouped["vuln_id"] == "GHSA-B"        # primary follows the fix
+    assert sorted(grouped["also"]) == ["GHSA-A", "GHSA-C"]
+    assert next(o for o in out if o["package"] == "paramiko")["fixed"] is None
+
+
+def test_render_with_also_fixes_roundtrips():
+    body = issue_format.render("pip", "25.1.1", "26.1.2", "PYSEC-2026-196", "CVE-2026-8643",
+                               ["requirements/development.txt"], "hero",
+                               also_fixes=["GHSA-1", "GHSA-2"])
+    assert "Also-Fixes: GHSA-1 GHSA-2" in body
+    f = issue_format.parse(9, body)
+    assert f is not None and f.package == "pip" and f.fixed == "26.1.2"
