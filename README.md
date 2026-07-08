@@ -55,6 +55,22 @@ flowchart LR
 Hand-drawn architecture, CI-loop, and deployment diagrams are in
 [`diagrams/`](diagrams/) (Excalidraw files — open at excalidraw.com).
 
+## Challenge coverage
+
+- **Use case selected:** CVE / vulnerable-dependency remediation in the
+  Superset fork, with one structured issue per package bump.
+- **Event trigger:** the scanner files an issue and applies the
+  `devin-remediate` label; a human applying that label takes the same path.
+- **Devin as the core primitive:** the orchestrator creates and polls Devin
+  sessions; Devin performs the code investigation, dependency changes,
+  test selection, and PR creation.
+- **Observable outputs:** GitHub issue comments, Devin session links, PRs,
+  validation checks, merge state, re-scan comments, `/events`,
+  `/remediations`, and the lightweight dashboard.
+- **Engineering-leader signal:** each remediation has a status, a PR/check
+  outcome, a time-to-PR, and an externally visible evidence chain:
+  detected → session → PR → validation → merge → re-scan.
+
 ## The definition of done (and why the dashboard can't lie)
 
 An issue counts as **remediated** only when *all* of:
@@ -104,19 +120,78 @@ python scanner/scan.py             # file issues / verify remediated ones
 
 ## Simulate mode (no credentials, no cost)
 
-Watch the whole orchestration path run without touching GitHub or Devin:
+Use this when reviewing the project without Devin, GitHub, or smee
+credentials. It exercises the real webhook handler, signature verification,
+structured issue parsing, idempotency, prompt assembly, session creation call,
+poller transition, status APIs, and dashboard rendering. GitHub and Devin are
+replaced with logging stubs, so nothing leaves your machine.
 
 ```bash
-SIMULATE=1 WEBHOOK_SECRET=test DEVIN_API_KEY=x DEVIN_ORG_ID=x \
-  GITHUB_TOKEN=x GITHUB_REPO=example/repo \
-  uvicorn --factory orchestrator.app:build_app --port 8000 &
+# terminal 1
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-WEBHOOK_SECRET=test python scripts/simulate_event.py          # full path runs
-WEBHOOK_SECRET=test python scripts/simulate_event.py          # deduped (new GUID, same issue)
+SIMULATE=1 \
+WEBHOOK_SECRET=test \
+DEVIN_API_KEY=x \
+DEVIN_ORG_ID=x \
+GITHUB_TOKEN=x \
+GITHUB_REPO=example/repo \
+DB_PATH=/tmp/devin-remediator-sim.db \
+uvicorn --factory orchestrator.app:build_app --port 8000
 ```
 
-The logs show signature verification, contract parsing, idempotency,
-the fully assembled Devin prompt, and the simulated session lifecycle.
+Then fire a signed `issues.labeled` webhook:
+
+```bash
+# terminal 2
+source .venv/bin/activate
+WEBHOOK_SECRET=test python scripts/simulate_event.py
+```
+
+Expected response:
+
+```text
+HTTP 200: {"accepted":true}
+Now check the orchestrator logs / the dashboard at http://127.0.0.1:8000
+```
+
+Expected terminal-1 logs include:
+
+```text
+SIMULATE=1 — Devin/GitHub calls are logged, not made
+[SIMULATE] would create Devin session 1: Remediate example-lib 1.2.3→1.2.9 (issue #42)
+[SIMULATE] assembled prompt (...)
+[SIMULATE] would comment on issue #42:
+🤖 Remediation session started: https://app.devin.ai/sessions/sim-1
+```
+
+Verify idempotency and the poller path:
+
+```bash
+# same delivery GUID is ignored
+WEBHOOK_SECRET=test python scripts/simulate_event.py --delivery replay-1
+WEBHOOK_SECRET=test python scripts/simulate_event.py --delivery replay-1
+
+# different issue creates a second simulated remediation
+WEBHOOK_SECRET=test python scripts/simulate_event.py --issue 43
+```
+
+Inspect the observable outputs:
+
+```bash
+curl http://127.0.0.1:8000/healthz
+curl http://127.0.0.1:8000/remediations
+curl http://127.0.0.1:8000/events
+open http://127.0.0.1:8000
+```
+
+In simulate mode the dashboard's GitHub-enriched fields stay best-effort,
+because there are no real GitHub checks or merge state. The important thing to
+verify locally is the event-driven automation path: signed webhook → parsed
+finding → deduped remediation row → simulated Devin session → issue comments →
+poller observes a PR → status endpoints/reporting update.
 
 ## Design decisions worth knowing
 
