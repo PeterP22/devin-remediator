@@ -1,5 +1,7 @@
 # devin-remediator
 
+> **TL;DR:** 6 findings in, 5 validated PRs out, 20/20 checks green, 0 human interventions before review, all 5 merged. Run live on 7 July 2026 against a ~600k LOC codebase.
+
 Event-driven CVE remediation built on the [Devin API](https://docs.devin.ai):
 a security finding on a repository becomes a **validated, merge-ready pull
 request** — with no engineer in the loop until code review.
@@ -246,3 +248,7 @@ diagrams/       Excalidraw architecture / CI-loop / deployment diagrams
 An ACU-metered agent plus a validation gate turns "remediate a CVE" into a
 priced, auditable unit of work — that's the operating model this demo argues
 for: **humans review code; they no longer produce the fix.**
+
+## License
+
+MIT. See [LICENSE](LICENSE).
